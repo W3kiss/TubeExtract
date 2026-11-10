@@ -1,0 +1,58 @@
+name: Release
+
+# Builds the Windows app on GitHub's servers and attaches it to a release.
+# Trigger: push a tag like v0.1.0  (git tag v0.1.0 && git push origin v0.1.0)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (portable exe + NSIS installer)
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir dist
+          cp src-tauri/target/release/tubeextract.exe dist/TubeExtract.exe
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe dist/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TubeExtract-windows
+          path: dist/*
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "TubeExtract $TAG" \
+            --notes "**TubeExtract.exe** — portable app, just run it. \`*-setup.exe\` — installer. On first launch the app downloads yt-dlp, FFmpeg and Deno into its own folder."
